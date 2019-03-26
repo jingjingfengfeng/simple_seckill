@@ -1,0 +1,50 @@
+version: '2'
+
+services:
+
+  logic:
+      build: ./logic
+      ports:
+        - "50051:50051"
+      depends_on:
+        - mysql
+        - redis
+      links:
+        - mysql
+        - redis
+          #restart: no
+      networks:
+        - default
+      tty: true
+
+  mysql:
+      build: ./mysql
+      ports:
+        - "3306:3306"
+      volumes:
+              - ./data/mysql/data:/var/lib/mysql
+              - ./data/mysql/config/mysql.cnf:/etc/mysql/conf.d/mysql.cnf
+      privileged: false
+      environment: 
+        - MYSQL_DATABASE=seckill
+        - MYSQL_USER=root
+        - MYSQL_PASSWORD=root
+        - MYSQL_ROOT_PASSWORD=root
+          #restart: no
+      networks:
+        - default
+      tty: true
+
+
+  redis:
+      build: ./redis
+      ports:
+        - "6379:6379"
+      volumes:
+        - ./data/redis/config/redis.conf:/usr/local/etc/redis/redis.conf
+        - ./data/redis/log/redis.log:/var/log/redis/redis.log
+      privileged: true
+      #restart: no
+      networks:
+        - default
+      tty: true
