@@ -7,6 +7,10 @@
 #include "SeckillWork.h"
 const int g_iMaxTry = 10;
 
+int SeckillWork::GetStatus(){
+	return m_eStatus; 
+}
+
 void SeckillWork::Proceed() 
 {
     if (m_eStatus == CREATE) {
@@ -26,23 +30,16 @@ void SeckillWork::Proceed()
         MYSQL *mysqlpMysqlConn = m_pMysqlPool->GetConnection();
         m_eStatus = FINISH;
 
-	int iWorkingNum = 0;
-	redisReply *pReply = (redisReply *)redisCommand(pRedisConn, "llen %s", "work_list");
-	if(NULL != pReply &&  REDIS_REPLY_INTEGER == pReply->type){
-		iWorkingNum = pReply->integer; 
-		freeReplyObject(pReply);
-	}
-
+//	int iWorkingNum = 0;
+//	redisReply *pReply = (redisReply *)redisCommand(pRedisConn, "llen %s", "work_list");
+//	if(NULL != pReply &&  REDIS_REPLY_INTEGER == pReply->type){
+//		iWorkingNum = pReply->integer; 
+//		freeReplyObject(pReply);
+//	}
 
         redisCommand(pRedisConn, "LPUSH work_list %s", "1");
-	new SeckillWork(m_pService, 
-			m_pCq,
-			m_pMysqlPool,
-			m_pRedisPool,
-			m_pRwLock ,
-			m_pFailedNum,
-			m_pSuccessNum
-		       );
+	new SeckillWork(m_pService, m_pCq, m_pMysqlPool, m_pRedisPool, m_pRwLock , m_pFailedNum, m_pSuccessNum);
+
 
         auto strUserName = m_oReq.str_user_name();
         auto strUserKey = m_oReq.str_user_key();
@@ -51,21 +48,20 @@ void SeckillWork::Proceed()
 
 	do {
 		//check max num
-		if(*m_pSuccessNum  >= 50) {
-			m_oRsp.set_uint32_result(0);
-			m_oRsp.set_str_err_msg("sold out");
-			LogWater(LOG_DEBUG,"1 working=%u succeedNum=%u",iWorkingNum,*m_pSuccessNum );
-			break;
-		}
+	//	if(*m_pSuccessNum  >= 50) {
+	//		m_oRsp.set_uint32_result(0);
+	//		m_oRsp.set_str_err_msg("sold out");
+	//		LogWater(LOG_DEBUG,"1 working=%u succeedNum=%u",iWorkingNum,*m_pSuccessNum );
+	//		break;
+	//	}
 
-		//check max num
-		if(iWorkingNum + *m_pSuccessNum >= 50) {
-			m_oRsp.set_uint32_result(0);
-			m_oRsp.set_str_err_msg("sold out");
-			LogWater(LOG_DEBUG,"2 working=%u succeedNum=%u",iWorkingNum,*m_pSuccessNum );
-			break;
-		}
-
+	//	//check max num
+	//	if(iWorkingNum + *m_pSuccessNum >= 50) {
+	//		m_oRsp.set_uint32_result(0);
+	//		m_oRsp.set_str_err_msg("sold out");
+	//		LogWater(LOG_DEBUG,"2 working=%u succeedNum=%u",iWorkingNum,*m_pSuccessNum );
+	//		break;
+	//	}
 
 		//check user
 		iRet = CheckUser(strUserName,
@@ -86,7 +82,8 @@ void SeckillWork::Proceed()
 	}while(0);
 	
         m_pRedisPool->CloseConnection(pRedisConn);
-        m_pMysqlPool->CloseConnection(mysqlpMysqlConn);
+	m_pMysqlPool->CloseConnection(mysqlpMysqlConn);
+	m_oRsp.set_uint32_req_id(m_iReqId);
 	m_oRspWriter.Finish(m_oRsp, Status::OK, this);
 
     } else {
@@ -98,6 +95,13 @@ void SeckillWork::Proceed()
         m_pRedisPool->CloseConnection(pRedisConn);
         delete this;
     }
+}
+
+
+int SeckillWork::SetReqId(int iReqId)
+{
+	m_iReqId = iReqId;
+	return 0;
 }
 
 int SeckillWork::SeckillProcOnMysqlTransaction(const string & strUserName, const string &strUserKey, MYSQL * pMysqlConn)
@@ -181,7 +185,8 @@ int SeckillWork::SeckillProcOnMysqlTransaction(const string & strUserName, const
     //update order_info
     LogWater(LOG_DEBUG,"line=%d",__LINE__);
     char insertOSql[200] = {'\0'};
-    sprintf(insertOSql, "INSERT INTO order_info(user_name,user_password,goods_id) VALUES ('%s','%s','1')", strUserName.c_str(),strUserKey.c_str());
+    sprintf(insertOSql, "INSERT INTO order_info(user_name,user_password,req_id, goods_id) VALUES ('%s','%s',%d,'1')", strUserName.c_str(),strUserKey.c_str(),m_iReqId);
+    printf("mysql:%s\n",insertOSql);
     iRet = mysql_query(pMysqlConn,insertOSql);
     if(iRet != 0) {
 	    m_oRsp.set_uint32_result(0);
@@ -203,8 +208,6 @@ int SeckillWork::SeckillProcOnMysqlTransaction(const string & strUserName, const
   //  }
 
 
-    m_oRsp.set_uint32_result(1);
-    ++ *m_pSuccessNum;
     LogWater(LOG_DEBUG,"mysql succeed\n");
     return 0;
 }
@@ -226,6 +229,9 @@ int SeckillWork::SeckillProcOnMysql(const string & strUserName,
     if(0 == iRet ) {
         //commit
         mysql_commit(pMysqlConn); 
+	m_oRsp.set_uint32_result(1);
+	m_oRsp.set_str_err_msg("succeed");
+	++ *m_pSuccessNum;
     } else if(100 == iRet) {
         //rollback
         mysql_rollback(pMysqlConn);
@@ -338,6 +344,7 @@ int SeckillWork::SeckillProcOnRedisTransaction(const string & strUserName,
     //redis sold out
     if(iCurCount <= 0) {
         m_oRsp.set_uint32_result(0);
+        m_oRsp.set_str_err_msg("sold out");
         std::cout << "seckill failed! The goods has sold out!" << std::endl;
         return 100; //hold
     }
@@ -351,6 +358,8 @@ int SeckillWork::SeckillProcOnRedisTransaction(const string & strUserName,
     if(pReply->type == REDIS_REPLY_STRING && pReply->str != NULL) {
         freeReplyObject(pReply);
 	std::cout<<"dup seckill"<<endl;
+	m_oRsp.set_uint32_result(0);
+	m_oRsp.set_str_err_msg("dup user");
         return 200; //hold
     }
     freeReplyObject(pReply);
