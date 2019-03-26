@@ -58,12 +58,20 @@ class SeckillWork {
                                     m_pRedisPool(pRedisPool),
                                     m_pRwLock(pRwLock),
                                     m_pFailedNum(pFailedNum),
-                                    m_pSuccessNum(pSuccessNum){
+                                    m_pSuccessNum(pSuccessNum), m_iReqId(0){
 
                                         Proceed(); //开始处理
                                     }
 
+	enum WorkerStatus  {
+		CREATE, 
+		PROCESS,
+		FINISH };
+
 	void Proceed();
+
+	int SetReqId(int iReqId);
+	int GetStatus();
     private:
 	int CheckUser(const string & strUserName,
                 const string &strUserKey,
@@ -113,11 +121,7 @@ class SeckillWork {
 
 
     private:
-        enum WorkerStatus  {
-            CREATE, 
-            PROCESS,
-            FINISH };
-
+        
         SeckillService::AsyncService* m_pService;
         ServerCompletionQueue* m_pCq;
         ServerContext m_oCtx;
@@ -134,6 +138,7 @@ class SeckillWork {
         pthread_rwlock_t *m_pRwLock;
         int *m_pFailedNum;
         int *m_pSuccessNum;
+	int m_iReqId;// req package req
 
 
 };

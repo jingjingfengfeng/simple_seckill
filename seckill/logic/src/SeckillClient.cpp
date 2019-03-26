@@ -205,6 +205,7 @@ int main(int argc, char** argv)
 
     int iRet = 0;
     for(int i = 0; i <  g_iClientNum; ++i) {
+    //for(int i = 0; i < 60; ++i) {
         int iRet  = pthread_create(&tids[i], NULL, SeckillProc, &strUser[i]);
         if (iRet != 0) {
             std::cout << "pthread_create.iRet=" << iRet << std::endl;

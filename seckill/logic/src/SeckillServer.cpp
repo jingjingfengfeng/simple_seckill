@@ -18,14 +18,14 @@ const int g_iReceSize = 3000;
 const int g_iSendSize = 3000;
 const int g_iWorkerNum = 30;
 
-const std::string g_strMysqlAddr     = "192.168.59.133";
+const std::string g_strMysqlAddr     = "192.168.59.134";
 const std::string g_strMysqlUserName = "root";
 const int         g_iMysqlPort       = 3306; 
 const std::string g_strUserPassword  = "root_password";
 const std::string g_strMysqlDB       = "seckill";
 const int         g_iMaxConnectCount = 30;
 
-const std::string g_strRedisAddr = "192.168.59.133";
+const std::string g_strRedisAddr = "192.168.59.134";
 const int         g_iRedisPort   =  6379;
 const int         g_iRedisMaxCount = 30;
 
@@ -52,7 +52,9 @@ class ServerImpl final{
 
             m_iFailNum = 0;
             m_iSucNum = 0; 
+	    m_iReqId = 0;
             pthread_rwlock_init(&m_rwlock, NULL);
+            pthread_rwlock_init(&m_rwReqIdlock, NULL);
             m_pRedisPool = pRedisPool;
 
             std::string strServerAddress(g_strServerAddr);
@@ -106,19 +108,47 @@ class ServerImpl final{
             void* pTag = NULL;; 
             bool bOk = false;;
 
-            while (true) {
-                //wait request
+	    redisContext *pRedisConn = m_pRedisPool->GetConnection();
+
+	    while (true) {
+
+		    if(m_iSucNum  < 50) {
+			    int iWorkingNum = 0;
+			    redisReply *pReply = (redisReply *)redisCommand(pRedisConn, "llen %s", "work_list");
+			    if(NULL != pReply &&  REDIS_REPLY_INTEGER == pReply->type){
+				    iWorkingNum = pReply->integer; 
+				    freeReplyObject(pReply);
+                              if(iWorkingNum + m_iSucNum   >= 50){
+				      continue;
+			      }
+			    }
+		    }
+
+
+		    //wait request
 		GPR_ASSERT(m_oCqueue->Next(&pTag, &bOk));
                 GPR_ASSERT(bOk);
-                static_cast<SeckillWork*>(pTag)->Proceed();
+
+		if(SeckillWork::PROCESS == static_cast<SeckillWork*>(pTag)->GetStatus()) {
+			pthread_rwlock_wrlock(&m_rwReqIdlock);
+			m_iReqId++; 
+			static_cast<SeckillWork*>(pTag)->SetReqId(m_iReqId);
+			printf("ireqid=%u\n",m_iReqId);
+			pthread_rwlock_unlock(&m_rwReqIdlock);
+		}
+
+		static_cast<SeckillWork*>(pTag)->Proceed();
             }
 
-        }
+	    m_pRedisPool->CloseConnection(pRedisConn);
+	}
 
     private:
         int m_iSucNum ;
         int m_iFailNum;
+	int m_iReqId;
         pthread_rwlock_t m_rwlock;
+        pthread_rwlock_t m_rwReqIdlock;
         RedisPool *m_pRedisPool;
         std::shared_ptr<ServerCompletionQueue> m_oCqueue;
         SeckillService::AsyncService m_oService;
@@ -190,7 +220,7 @@ int GeneData(MysqlPool *pMysql, RedisPool *pRedis)
     if(iRet != 0) {
         return -__LINE__;
     }
-    strMysqlCmd = "CREATE TABLE IF NOT EXISTS order_info(user_name VARCHAR(100) NOT NULL,user_password VARCHAR(100) NOT NULL,goods_id VARCHAR(100) NOT NULL,PRIMARY KEY (user_name));";
+    strMysqlCmd = "CREATE TABLE IF NOT EXISTS order_info(user_name VARCHAR(100) NOT NULL,user_password VARCHAR(100) NOT NULL,req_id INT UNSIGNED NOT NULL,goods_id VARCHAR(100) NOT NULL,PRIMARY KEY (user_name));";
     iRet = mysql_query(pMysqlConn, strMysqlCmd.c_str());
     if(iRet != 0) {
 	    return -__LINE__;

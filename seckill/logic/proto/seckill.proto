@@ -10,6 +10,7 @@ message SeckillRequest {
 message SeckillResponse {
   uint32 uint32_result = 1;
   string str_err_msg = 2; 
+  uint32 uint32_req_id = 3;
 }
 
 service SeckillService {
